@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from supabase import create_client
 from postgrest.exceptions import APIError
 from utils.pin_utils import generar_pin_2letras_3numeros
@@ -8,6 +8,7 @@ import os
 import re
 
 router = APIRouter(prefix="/verificacion", tags=["verificacion"])
+
 
 # ✅ HELPERS
 def only_digits(s: str) -> str:
@@ -21,6 +22,7 @@ def to_int_or_400(value: str, field_name="Cédula") -> int:
         return int(value)
     except Exception:
         raise HTTPException(status_code=400, detail=f"{field_name} inválida")
+
 
 # ✅ MODELOS (entrada como string; convertimos a int antes de consultar)
 class RegistroInicialIn(BaseModel):
@@ -41,6 +43,7 @@ class PinIn(BaseModel):
 class ReenviarPinIn(BaseModel):
     cedula: str
 
+
 # ✅ SUPABASE
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -50,13 +53,15 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
 # ✅ ENDPOINTS
 @router.get("/pin-test")
 def pin_test():
     return {"pin": generar_pin_2letras_3numeros()}
 
+
 @router.post("/registro-inicial")
-def registro_inicial(data: RegistroInicialIn):
+def registro_inicial(data: RegistroInicialIn, background_tasks: BackgroundTasks):
     payload = data.model_dump()
 
     # ✅ Normalizar
@@ -101,21 +106,14 @@ def registro_inicial(data: RegistroInicialIn):
     if not resp.data:
         raise HTTPException(status_code=500, detail="No se pudo guardar en autorizados")
 
-    # ✅ Enviar correo (sin tumbar endpoint)
-    email_sent = False
-    email_error = None
-    try:
-        email_sent, email_error = enviar_pin_por_correo(correo, pin)
-    except Exception as e:
-        email_sent = False
-        email_error = str(e)
+    # ✅ Enviar correo en segundo plano (NO bloquea la respuesta)
+    background_tasks.add_task(enviar_pin_por_correo, correo, pin)
 
     return {
         "ok": True,
         "message": "Guardado en autorizados ✅",
-        "email_sent": email_sent,
-        "email_error": email_error,
     }
+
 
 @router.post("/cedula")
 def verificar_cedula(payload: CedulaIn):
@@ -138,6 +136,7 @@ def verificar_cedula(payload: CedulaIn):
         raise HTTPException(status_code=400, detail={"where": "SUPABASE SELECT", "error": str(e)})
 
     return {"ok": bool(resp.data)}
+
 
 @router.post("/pin")
 def verificar_pin(payload: PinIn):
@@ -178,8 +177,9 @@ def verificar_pin(payload: PinIn):
         "sede": row.get("sede"),
     }
 
+
 @router.post("/reenviar-pin")
-def reenviar_pin(payload: ReenviarPinIn):
+def reenviar_pin(payload: ReenviarPinIn, background_tasks: BackgroundTasks):
     cedula_str = only_digits(payload.cedula)
     if not cedula_str:
         raise HTTPException(status_code=400, detail="Cédula inválida")
@@ -209,17 +209,7 @@ def reenviar_pin(payload: ReenviarPinIn):
     if not pin:
         raise HTTPException(status_code=400, detail="No hay PIN registrado para reenviar")
 
-    email_sent = False
-    email_error = None
-    try:
-        email_sent, email_error = enviar_pin_por_correo(correo, pin)
-    except Exception as e:
-        email_sent = False
-        email_error = str(e)
+    # ✅ Enviar correo en segundo plano (NO bloquea la respuesta)
+    background_tasks.add_task(enviar_pin_por_correo, correo, pin)
 
-    return {
-        "ok": True,
-        "email_sent": email_sent,
-        "email_error": email_error,
-    }
-
+    return {"ok": True}
