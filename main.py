@@ -1,6 +1,7 @@
+import os
 from pathlib import Path
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,9 +9,11 @@ from routes.verificacion import router as verificacion_router
 from routes.encuestas import router as encuestas_router
 from routes.autorizados import router as autorizados_router
 
-# ✅ Cargar .env con ruta absoluta (evita fallos con uvicorn --reload)
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env", override=True)
+
+# ✅ Solo cargar .env en local (Render ya usa Environment Variables)
+if not os.getenv("RENDER"):
+    load_dotenv(BASE_DIR / ".env")
 
 app = FastAPI(debug=True)
 
@@ -23,6 +26,7 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5174",
         "https://wkseguimientos.netlify.app",
+        "https://www.wkseguimientos.netlify.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
