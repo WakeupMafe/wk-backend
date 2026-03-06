@@ -10,12 +10,16 @@ import re
 router = APIRouter(prefix="/verificacion", tags=["verificacion"])
 
 
-# ✅ HELPERS
+# =========================
+# HELPERS
+# =========================
 def only_digits(s: str) -> str:
     return re.sub(r"\D+", "", (s or "")).strip()
 
+
 def clean_str(s: str) -> str:
     return (s or "").strip()
+
 
 def to_int_or_400(value: str, field_name="Cédula") -> int:
     try:
@@ -24,7 +28,9 @@ def to_int_or_400(value: str, field_name="Cédula") -> int:
         raise HTTPException(status_code=400, detail=f"{field_name} inválida")
 
 
-# ✅ MODELOS (entrada como string; convertimos a int antes de consultar)
+# =========================
+# MODELOS
+# =========================
 class RegistroInicialIn(BaseModel):
     nombres: str
     apellidos: str
@@ -33,18 +39,23 @@ class RegistroInicialIn(BaseModel):
     sede: str
     cedula: str
 
+
 class CedulaIn(BaseModel):
     cedula: str
+
 
 class PinIn(BaseModel):
     cedula: str
     pin: str
 
+
 class ReenviarPinIn(BaseModel):
     cedula: str
 
 
-# ✅ SUPABASE
+# =========================
+# SUPABASE
+# =========================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -54,7 +65,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# ✅ ENDPOINTS
+# =========================
+# ENDPOINTS
+# =========================
 @router.get("/pin-test")
 def pin_test():
     return {"pin": generar_pin_2letras_3numeros()}
@@ -64,7 +77,6 @@ def pin_test():
 def registro_inicial(data: RegistroInicialIn, background_tasks: BackgroundTasks):
     payload = data.model_dump()
 
-    # ✅ Normalizar
     cedula_str = only_digits(payload.get("cedula"))
     celular = only_digits(payload.get("celular"))
     correo = clean_str(payload.get("correo")).lower()
@@ -77,8 +89,28 @@ def registro_inicial(data: RegistroInicialIn, background_tasks: BackgroundTasks)
     if not sede:
         raise HTTPException(status_code=400, detail="Sede obligatoria")
 
-    # ✅ convertir a int para guardar en int8
     cedula = to_int_or_400(cedula_str, "Cédula")
+
+    try:
+        existente = (
+            supabase
+            .table("autorizados")
+            .select("cedula, correo, pin")
+            .eq("cedula", cedula)
+            .limit(1)
+            .execute()
+        )
+    except APIError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"where": "SUPABASE SELECT EXISTENTE", "error": str(e)},
+        )
+
+    if existente.data:
+        raise HTTPException(
+            status_code=409,
+            detail="El usuario que intentas registrar ya está en nuestro sistema.",
+        )
 
     pin = generar_pin_2letras_3numeros()
 
@@ -86,32 +118,33 @@ def registro_inicial(data: RegistroInicialIn, background_tasks: BackgroundTasks)
         resp = (
             supabase
             .table("autorizados")
-            .upsert(
+            .insert(
                 {
-                    "cedula": cedula,     # ✅ int
+                    "cedula": cedula,
                     "pin": pin,
                     "nombres": nombres,
                     "apellidos": apellidos,
                     "correo": correo,
                     "celular": celular,
                     "sede": sede,
-                },
-                on_conflict="cedula",
+                }
             )
             .execute()
         )
     except APIError as e:
-        raise HTTPException(status_code=400, detail={"where": "SUPABASE UPSERT", "error": str(e)})
+        raise HTTPException(
+            status_code=400,
+            detail={"where": "SUPABASE INSERT", "error": str(e)},
+        )
 
     if not resp.data:
         raise HTTPException(status_code=500, detail="No se pudo guardar en autorizados")
 
-    # ✅ Enviar correo en segundo plano (NO bloquea la respuesta)
     background_tasks.add_task(enviar_pin_por_correo, correo, pin)
 
     return {
         "ok": True,
-        "message": "Guardado en autorizados ✅",
+        "message": "Usuario registrado correctamente. PIN enviado al correo.",
     }
 
 
@@ -121,21 +154,28 @@ def verificar_cedula(payload: CedulaIn):
     if not cedula_str:
         raise HTTPException(status_code=400, detail="Cédula inválida")
 
-    cedula = to_int_or_400(cedula_str, "Cédula")  # ✅ int
+    cedula = to_int_or_400(cedula_str, "Cédula")
 
     try:
         resp = (
             supabase
             .table("autorizados")
-            .select("cedula")
-            .eq("cedula", cedula)  # ✅ compara int con int8
+            .select("cedula, nombres, correo")
+            .eq("cedula", cedula)
             .limit(1)
             .execute()
         )
     except APIError as e:
-        raise HTTPException(status_code=400, detail={"where": "SUPABASE SELECT", "error": str(e)})
+        raise HTTPException(
+            status_code=400,
+            detail={"where": "SUPABASE SELECT", "error": str(e)},
+        )
 
-    return {"ok": bool(resp.data)}
+    return {
+        "ok": bool(resp.data),
+        "exists": bool(resp.data),
+        "message": "Cédula encontrada" if resp.data else "Cédula no encontrada",
+    }
 
 
 @router.post("/pin")
@@ -148,19 +188,22 @@ def verificar_pin(payload: PinIn):
     if not pin:
         raise HTTPException(status_code=400, detail="PIN vacío")
 
-    cedula = to_int_or_400(cedula_str, "Cédula")  # ✅ int
+    cedula = to_int_or_400(cedula_str, "Cédula")
 
     try:
         resp = (
             supabase
             .table("autorizados")
             .select("pin, nombres, sede")
-            .eq("cedula", cedula)  # ✅ int vs int8
+            .eq("cedula", cedula)
             .limit(1)
             .execute()
         )
     except APIError as e:
-        raise HTTPException(status_code=400, detail={"where": "SUPABASE SELECT", "error": str(e)})
+        raise HTTPException(
+            status_code=400,
+            detail={"where": "SUPABASE SELECT", "error": str(e)},
+        )
 
     if not resp.data:
         return {"ok": False}
@@ -184,19 +227,22 @@ def reenviar_pin(payload: ReenviarPinIn, background_tasks: BackgroundTasks):
     if not cedula_str:
         raise HTTPException(status_code=400, detail="Cédula inválida")
 
-    cedula = to_int_or_400(cedula_str, "Cédula")  # ✅ int
+    cedula = to_int_or_400(cedula_str, "Cédula")
 
     try:
         resp = (
             supabase
             .table("autorizados")
             .select("correo, pin")
-            .eq("cedula", cedula)  # ✅ int vs int8
+            .eq("cedula", cedula)
             .limit(1)
             .execute()
         )
     except APIError as e:
-        raise HTTPException(status_code=400, detail={"where": "SUPABASE SELECT", "error": str(e)})
+        raise HTTPException(
+            status_code=400,
+            detail={"where": "SUPABASE SELECT", "error": str(e)},
+        )
 
     if not resp.data:
         raise HTTPException(status_code=404, detail="Cédula no encontrada")
@@ -209,7 +255,9 @@ def reenviar_pin(payload: ReenviarPinIn, background_tasks: BackgroundTasks):
     if not pin:
         raise HTTPException(status_code=400, detail="No hay PIN registrado para reenviar")
 
-    # ✅ Enviar correo en segundo plano (NO bloquea la respuesta)
     background_tasks.add_task(enviar_pin_por_correo, correo, pin)
 
-    return {"ok": True}
+    return {
+        "ok": True,
+        "message": "PIN reenviado correctamente",
+    }
