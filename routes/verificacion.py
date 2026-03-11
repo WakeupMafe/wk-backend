@@ -28,6 +28,11 @@ def to_int_or_400(value: str, field_name="Cédula") -> int:
         raise HTTPException(status_code=400, detail=f"{field_name} inválida")
 
 
+def serialize_single_row(response):
+    if not response.data:
+        return None
+    return response.data[0]
+
 # =========================
 # MODELOS
 # =========================
@@ -260,4 +265,84 @@ def reenviar_pin(payload: ReenviarPinIn, background_tasks: BackgroundTasks):
     return {
         "ok": True,
         "message": "PIN reenviado correctamente",
+    }
+@router.get("/logros-fase1/{cedula}")
+def obtener_logros_fase1(cedula: str):
+    cedula_str = only_digits(cedula)
+    if not cedula_str:
+        raise HTTPException(status_code=400, detail="Cédula inválida")
+
+    cedula_int = to_int_or_400(cedula_str, "Cédula")
+
+    try:
+        resp = (
+            supabase
+            .table("wakeup_seguimientos")
+            .select("""
+                created_at,
+                nombres,
+                apellidos,
+                tipo_documento,
+                documento,
+                limitacion_moverse,
+                actividades_afectadas,
+                sintoma_1,
+                sintoma_2,
+                sintoma_3,
+                otro_sintoma,
+                objetivo_1,
+                objetivo_2,
+                objetivo_3,
+                objetivos_seleccionados,
+                objetivo_extra,
+                adicional_no_puede,
+                ultima_vez,
+                que_impide,
+                id_int,
+                sede,
+                encuestador
+            """)
+            .eq("documento", cedula_int)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except APIError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"where": "SUPABASE SELECT LOGROS FASE 1", "error": str(e)},
+        )
+
+    row = serialize_single_row(resp)
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró encuesta de Logros Fase 1 para esta cédula",
+        )
+
+    row["encuestador_nombre"] = ""
+
+    if row.get("encuestador"):
+        try:
+            resp_encuestador = (
+                supabase
+                .table("autorizados")
+                .select("nombres, apellidos")
+                .eq("cedula", row["encuestador"])
+                .limit(1)
+                .execute()
+            )
+
+            if resp_encuestador.data:
+                enc = resp_encuestador.data[0]
+                row["encuestador_nombre"] = (
+                    f'{enc.get("nombres", "")} {enc.get("apellidos", "")}'.strip()
+                )
+        except APIError:
+            row["encuestador_nombre"] = ""
+
+    return {
+        "ok": True,
+        "data": row,
     }
