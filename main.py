@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routes.verificacion import router as verificacion_router
 from routes.encuestas import router as encuestas_router
+from routes.encuesta_logros2 import router as encuesta_logros2_router
 from routes.autorizados import router as autorizados_router
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,6 +38,7 @@ app.add_middleware(
 # ✅ Rutas
 app.include_router(verificacion_router)
 app.include_router(encuestas_router)
+app.include_router(encuesta_logros2_router)
 app.include_router(autorizados_router)
 
 @app.get("/")

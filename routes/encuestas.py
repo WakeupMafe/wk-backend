@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, root_validator
 from typing import List, Optional, Dict
 from postgrest.exceptions import APIError
@@ -10,21 +10,49 @@ router = APIRouter(prefix="/encuestas", tags=["Encuestas"])
 
 # ------- Helpers --------
 
-def limpiar_documento(doc: str) -> str:
-    """
-    Devuelve documento limpio como STRING:
-    - solo dígitos
-    - longitud 6 a 10
-    """
+def limpiar_documento_encuestador(doc: str) -> str:
+    """Cédula del encuestador: solo dígitos, 6 a 11."""
     doc = (doc or "").strip()
 
     if not re.fullmatch(r"\d+", doc):
         raise HTTPException(status_code=400, detail="El documento debe contener solo números.")
 
-    if len(doc) < 6 or len(doc) > 10:
-        raise HTTPException(status_code=400, detail="El documento debe tener entre 6 y 10 dígitos.")
+    if len(doc) < 6 or len(doc) > 11:
+        raise HTTPException(status_code=400, detail="El documento debe tener entre 6 y 11 dígitos.")
 
     return doc
+
+
+def limpiar_documento_paciente(doc: str, tipo_documento: Optional[str] = None) -> str:
+    """
+    Documento del paciente según tipo:
+    - registro_civil, pasaporte: alfanumérico y guion, 5–30 caracteres
+    - cédula, tarjeta de identidad, CE: solo dígitos, 6–11
+    """
+    t = (tipo_documento or "").strip().lower()
+    doc = (doc or "").strip()
+
+    if t in ("registro_civil", "pasaporte"):
+        cleaned = re.sub(r"[^A-Za-z0-9\-]", "", doc)
+        if len(cleaned) < 5 or len(cleaned) > 30:
+            raise HTTPException(
+                status_code=400,
+                detail="Para registro civil o pasaporte use entre 5 y 30 caracteres (letras, números o guion).",
+            )
+        return cleaned.upper()
+
+    if not re.fullmatch(r"\d+", doc):
+        raise HTTPException(status_code=400, detail="El documento debe contener solo números.")
+
+    if len(doc) < 6 or len(doc) > 11:
+        raise HTTPException(status_code=400, detail="El documento debe tener entre 6 y 11 dígitos.")
+
+    return doc
+
+
+def limpiar_documento(doc: str) -> str:
+    """Compatibilidad: mismo criterio que encuestador (solo dígitos 6–11)."""
+    return limpiar_documento_encuestador(doc)
 
 
 def validar_min_max(lista: List[str], campo: str, min_v: int, max_v: int):
@@ -79,8 +107,8 @@ class EncuestaIn(BaseModel):
 @router.post("/")
 def crear_encuesta(data: EncuestaIn):
     # ---- Limpieza/validación docs como STRING ----
-    doc_paciente = limpiar_documento(data.documento)
-    doc_encuestador = limpiar_documento(data.encuestador)
+    doc_paciente = limpiar_documento_paciente(data.documento, data.tipoDocumento)
+    doc_encuestador = limpiar_documento_encuestador(data.encuestador)
 
     sede_clean = (data.sede or "").strip()
     if not sede_clean:
@@ -183,8 +211,11 @@ def crear_encuesta(data: EncuestaIn):
 
 
 @router.get("/exists/{documento}")
-def encuesta_existe(documento: str):
-    doc_paciente = limpiar_documento(documento)
+def encuesta_existe(
+    documento: str,
+    tipo_documento: Optional[str] = Query(None, description="Mismo tipo que en el formulario (ej. registro_civil)"),
+):
+    doc_paciente = limpiar_documento_paciente(documento, tipo_documento or "cedula")
     supabase = get_supabase()
 
     res = (
