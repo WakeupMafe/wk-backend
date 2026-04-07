@@ -75,7 +75,7 @@ def get_autorizado_por_pin(pin: str, request: Request):
     if cached:
         expira, data = cached
         if now < expira:
-            print(f"⚡ cache hit pin: {pin}")
+            print(f"[cache] hit pin: {pin}", flush=True)
             return {"ok": True, "data": data}
         else:
             # expiró
@@ -95,7 +95,10 @@ def get_autorizado_por_pin(pin: str, request: Request):
         )
 
         t1 = time.perf_counter()
-        print(f"⏱️ /autorizados/pin/* supabase.execute(): {(t1 - t0)*1000:.0f} ms")
+        print(
+            f"[autorizados] /pin supabase {(t1 - t0) * 1000:.0f} ms",
+            flush=True,
+        )
 
         if not res.data:
             raise HTTPException(status_code=404, detail="PIN no encontrado.")

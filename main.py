@@ -30,6 +30,8 @@ app.add_middleware(
         "https://wkseguimientos.netlify.app",
         "https://www.wkseguimientos.netlify.app",
     ],
+    # localhost y 127.0.0.1 son orígenes distintos; cualquier puerto de dev (Vite, etc.)
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

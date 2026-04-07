@@ -1,0 +1,37 @@
+-- =============================================================================
+-- RLS: tablas public.autorizados y public.wakeup_seguimientos (Supabase)
+-- =============================================================================
+-- Si RLS está ACTIVADO y no hay filas en pg_policies para esa tabla, los roles
+-- `anon` y `authenticated` no ven filas en SELECT.
+--
+-- El backend FastAPI usa SUPABASE_SERVICE_ROLE_KEY → ignora RLS. Si algo falla:
+--   Project Settings → API → copia "service_role" (secreta) al .env del backend,
+--   no la clave "anon" / "public".
+--
+-- Comprobar políticas:
+--   SELECT * FROM pg_policies WHERE tablename IN ('autorizados','wakeup_seguimientos');
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Opción A — Desarrollo: desactivar RLS (solo si solo accede el backend)
+-- Descomenta SOLO la línea de la tabla que necesites:
+-- -----------------------------------------------------------------------------
+-- ALTER TABLE public.autorizados DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE public.wakeup_seguimientos DISABLE ROW LEVEL SECURITY;
+
+-- -----------------------------------------------------------------------------
+-- Opción B — RLS activo + lectura anon (solo pruebas; datos sensibles)
+-- -----------------------------------------------------------------------------
+-- ALTER TABLE public.autorizados ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "autorizados_select_anon" ON public.autorizados
+--   FOR SELECT TO anon USING (true);
+--
+-- ALTER TABLE public.wakeup_seguimientos ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "seguimientos_select_anon" ON public.wakeup_seguimientos
+--   FOR SELECT TO anon USING (true);
+
+-- -----------------------------------------------------------------------------
+-- Opción C — authenticated (ajusta USING a tu modelo, ej. auth.uid())
+-- -----------------------------------------------------------------------------
+-- CREATE POLICY "autorizados_select_auth" ON public.autorizados
+--   FOR SELECT TO authenticated USING (true);
